@@ -1,0 +1,190 @@
+# ========================
+# APM Server ConfigMap
+# ========================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: java-apm-server-config
+  namespace: dis-poc-514020
+data:
+  apm-server.yml: |
+    apm-server:
+      host: "0.0.0.0:8200"
+    otlp:
+      enabled: true
+      protocols:
+        grpc:
+          host: "0.0.0.0:4317"
+    output.elasticsearch:
+      hosts: ["http://ecom-elasticsearch-svc:9200"]
+      username: "elastic"
+      password: "mubazir@786"
+
+---
+
+# ========================
+# APM Server Deployment
+# ========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-apm-server
+  namespace: dis-poc-514020
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-apm-server
+  template:
+    metadata:
+      labels:
+        app: java-apm-server
+    spec:
+      containers:
+        - name: java-apm-server
+          image: docker.elastic.co/apm/apm-server:9.2.2
+          ports:
+            - containerPort: 8200
+              name: apm-http
+            - containerPort: 4317
+              name: otlp-grpc
+          volumeMounts:
+            - name: apm-config
+              mountPath: /usr/share/apm-server/apm-server.yml
+              subPath: apm-server.yml
+            - name: apm-data
+              mountPath: /usr/share/apm-server/data
+      volumes:
+        - name: apm-config
+          configMap:
+            name: java-apm-server-config
+        - name: apm-data
+          emptyDir: {}
+
+---
+
+# ========================
+# APM Server Service
+# ========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-apm-server-svc
+  namespace: dis-poc-514020
+spec:
+  selector:
+    app: java-apm-server
+  ports:
+    - port: 8200
+      targetPort: 8200
+      protocol: TCP
+      name: http
+    - port: 4317
+      targetPort: 4317
+      protocol: TCP
+      name: otlp-grpc
+
+---
+
+# ========================
+# OTEL Collector ConfigMap
+# ========================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: java-otel-collector-config
+  namespace: dis-poc-514020
+data:
+  otel-collector-config.yml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    exporters:
+      otlp/apm:
+        endpoint: http://java-apm-server-svc:8200
+        tls:
+          insecure: true
+      elasticsearch/logs:
+        endpoints: ["http://ecom-elasticsearch-svc:9200"]
+        user: "elastic"
+        password: "mubazir@786"
+        index: "otel-logs-%{+yyyy.MM.dd}"
+        
+      logging:
+        loglevel: debug
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [otlp/apm, logging]
+        metrics:
+          receivers: [otlp]
+          exporters: [logging]
+
+---
+
+# ========================
+# OTEL Collector Deployment
+# ========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-otel-collector
+  namespace: dis-poc-514020
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-otel-collector
+  template:
+    metadata:
+      labels:
+        app: java-otel-collector
+    spec:
+      containers:
+        - name: java-otel-collector
+          image: otel/opentelemetry-collector-contrib:0.94.0
+          args: ["--config=/etc/otel-collector-config/otel-collector-config.yml"]
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 4318
+              name: otlp-http
+            - containerPort: 8888
+              name: telemetry
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel-collector-config
+              readOnly: true
+      volumes:
+        - name: otel-config
+          configMap:
+            name: java-otel-collector-config
+
+---
+
+# ========================
+# OTEL Collector Service
+# ========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-otel-collector-svc
+  namespace: dis-poc-514020
+spec:
+  selector:
+    app: java-otel-collector
+  ports:
+    - port: 4317
+      targetPort: 4317
+      name: otlp-grpc
+    - port: 4318
+      targetPort: 4318
+      name: otlp-http
+
