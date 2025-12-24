@@ -1,0 +1,193 @@
+# logstash.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecom-logstash
+  namespace: dis-poc-514020
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecom-logstash
+  template:
+    metadata:
+      labels:
+        app: ecom-logstash
+    spec:
+      containers:
+      - name: ecom-logstash
+        image: docker.elastic.co/logstash/logstash:9.2.2
+        command: ["logstash", "-f", "/etc/logstash/conf.d/"]
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /etc/logstash/conf.d/
+        ports:
+        - containerPort: 5044
+      volumes:
+      - name: logstash-config
+        configMap:
+          name: ecom-logstash-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecom-logstash-config
+  namespace: dis-poc-514020
+data:
+  logstash.conf: |
+    input {
+      beats {
+        port => 5044
+        host => "0.0.0.0"
+        client_inactivity_timeout => 120
+      }
+    }
+    
+    filter {
+      # ------------------------------------------------------------------
+      # STEP 1: Preserve original message
+      # ------------------------------------------------------------------
+      if ![event][original] {
+        mutate {
+          add_field => { "[event][original]" => "%{message}" }
+        }
+      }
+    
+      # ------------------------------------------------------------------
+      # STEP 2: Detect and parse JSON logs
+      # ------------------------------------------------------------------
+      if [message] =~ /^\s*\{/ {
+        json {
+          source => "message"
+          target => "parsed"
+          skip_on_invalid_json => true
+        }
+    
+        if [parsed] {
+          # Copy fields from parsed to top level
+          mutate {
+            copy => {
+              "[parsed][message]" => "message"
+              "[parsed][level]" => "level"
+              "[parsed][request_id]" => "request_id"
+              "[parsed][session_id]" => "session_id"
+              "[parsed][user_id]" => "user_id"
+              "[parsed][service]" => "service_name"
+              "[parsed][environment]" => "environment"
+              "[parsed][country]" => "country"
+              "[parsed][user_agent]" => "user_agent"
+              "[parsed][device_type]" => "device_type"
+              "[parsed][response_time_ms]" => "response_time_ms"
+              "[parsed][db_query_time]" => "db_query_time"
+              "[parsed][cache_hit]" => "cache_hit"
+              "[parsed][http_status_code]" => "http_status_code"
+              "[parsed][geo][location]" => "geo.location"
+            }
+          }
+
+          # Set log_source - use service name as fallback if not present
+          if [parsed][log_source] {
+            mutate {
+              copy => { "[parsed][log_source]" => "log_source" }
+            }
+          } else if [service_name] {
+            mutate {
+              copy => { "service_name" => "log_source" }
+            }
+          } else {
+            mutate {
+              add_field => { "log_source" => "default" }
+            }
+          }
+
+          # Set log_type for JSON logs
+          mutate {
+            add_field => { "log_type" => "application_json" }
+          }
+
+          # Clean up parsed field
+          mutate {
+            remove_field => ["parsed"]
+          }
+        }
+    
+      } else {
+        # Non-JSON logs (startup messages, etc.) - set defaults
+        mutate {
+          add_field => {
+            "log_type" => "plaintext"
+            "level" => "info"
+            "log_source" => "unknown"
+          }
+        }
+      }
+    
+      # ------------------------------------------------------------------
+      # STEP 3: Normalize @timestamp
+      # ------------------------------------------------------------------
+      if [message] =~ /^\s*\{/ {
+        # Only parse timestamp for JSON logs
+        date {
+          match => ["[parsed][timestamp]", "ISO8601"]
+          target => "@timestamp"
+          timezone => "UTC"
+        }
+      }
+    
+      # ------------------------------------------------------------------
+      # STEP 4: Remove empty/null fields and clean up
+      # ------------------------------------------------------------------
+      mutate {
+        remove_field => ["[event][original]"]
+      }
+    
+      # ------------------------------------------------------------------
+      # STEP 5: Type conversions for numeric fields
+      # ------------------------------------------------------------------
+      mutate {
+        convert => {
+          "response_time_ms" => "integer"
+          "db_query_time" => "integer"
+          "http_status_code" => "integer"
+          "cache_hit" => "boolean"
+        }
+      }
+    }
+    
+    output {
+      stdout {
+        codec => rubydebug
+      }
+    
+      elasticsearch {
+        hosts => ["http://ecom-elasticsearch-svc:9200"]
+        index => "ecom-%{log_source}-%{+YYYY.MM.dd}"
+        timeout => 60
+       
+        user     => "elastic"
+        password => "mubazir@786"
+       
+        
+      }
+    }
+
+---
+
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecom-logstash-svc
+  namespace: dis-poc-514020
+spec:
+  selector:
+    app: ecom-logstash
+  ports:
+  - port: 5044
+    targetPort: 5044
+    
+    
+    
+    
+    
