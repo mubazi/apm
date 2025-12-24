@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecom-kibana
+  namespace: dis-poc-514020
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecom-kibana
+  template:
+    metadata:
+      labels:
+        app: ecom-kibana
+    spec:
+      containers:
+      - name: ecom-kibana
+        image: docker.elastic.co/kibana/kibana:9.2.2
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://ecom-elasticsearch-svc:9200"
+        - name: ELASTICSEARCH_USERNAME
+          value: "kibana"
+        - name: ELASTICSEARCH_PASSWORD
+          value: "kibana123"
+        - name: XPACK_SECURITY_ENABLED
+          value: "true"
+        # CRITICAL: These 3 encryption keys MUST be set for Fleet to work
+        - name: XPACK_ENCRYPTED_SAVED_OBJECTS_ENCRYPTION_KEY
+          value: "u8vK3x2B!q4Tz6R9mL0pW7eY#s1C8dG5hJ2kL4mN6pQ8rS0tU2vW4xY6zA8"
+        - name: XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY
+          value: "u8vK3x2B!q4Tz6R9mL0pW7eY#s1C8dG5hJ2kL4mN6pQ8rS0tU2vW4xY6zA8"
+        - name: XPACK_SECURITY_SESSION_IDLETIMEOUTMINUTES
+          value: "60"
+        - name: XPACK_FLEET_AGENTS_ELASTICSEARCH_HOST
+          value: "http://ecom-elasticsearch-svc:9200"
+        - name: XPACK_FLEET_AGENTS_ELASTICSEARCH_USERNAME
+          value: "elastic"
+        - name: XPACK_FLEET_AGENTS_ELASTICSEARCH_PASSWORD
+          value: "mubazir@786"
+        ports:
+        - containerPort: 5601
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 60
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecom-kibana-svc
+  namespace: dis-poc-514020
+spec:
+  selector:
+    app: ecom-kibana
+  ports:
+  - port: 5601
+    targetPort: 5601
+  type: NodePort
