@@ -1,0 +1,57 @@
+# elasticsearch.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecom-elasticsearch
+  namespace: dis-poc-514020
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecom-elasticsearch
+  template:
+    metadata:
+      labels:
+        app: ecom-elasticsearch
+    spec:
+      containers:
+      - name: ecom-elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:9.2.2
+        env:
+        - name: discovery.type
+          value: single-node
+        - name: ES_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: xpack.security.enabled
+          value: "true"
+        - name: xpack.security.enrollment.enabled
+          value: "true"
+        - name: ELASTIC_PASSWORD
+          value: "mubazir@786"  # Set your password here
+        - name: xpack.security.http.ssl.enabled
+          value: "false"  # Set to true for production with certs
+        - name: xpack.security.transport.ssl.enabled
+          value: "false"  # Set to true for production
+          
+        ports:
+        - containerPort: 9200
+        volumeMounts:
+        - name: elasticsearch-data
+          mountPath: /usr/share/elasticsearch/data
+      volumes:
+      - name: elasticsearch-data
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecom-elasticsearch-svc
+  namespace: dis-poc-514020
+spec:
+  selector:
+    app: ecom-elasticsearch
+  ports:
+  - port: 9200
+    targetPort: 9200
+    
