@@ -1,0 +1,77 @@
+# filebeat-9.2.2-simple.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecom-filebeat
+  namespace: dis-poc-514020
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecom-filebeat
+  template:
+    metadata:
+      labels:
+        app: ecom-filebeat
+    spec:
+      # REMOVED: serviceAccountName: filebeat
+      containers:
+      - name: ecom-filebeat
+        image: docker.elastic.co/beats/filebeat:9.2.2
+        args: ["-c", "/etc/filebeat.yml", "-e", "--strict.perms=false"]
+        volumeMounts:
+        - name: filebeat-config
+          mountPath: /etc/filebeat.yml
+          subPath: filebeat.yml
+        
+        - name: app-logs
+          mountPath: /mnt/ecom-logs
+
+        - name: filebeat-data
+          mountPath: /usr/share/filebeat/data
+
+      volumes:
+      - name: filebeat-config
+        configMap:
+          name: ecom-filebeat-config-9
+      - name: app-logs
+        persistentVolumeClaim:
+          claimName: ecom-log-pvc
+      - name: filebeat-data
+        emptyDir: {}      
+          
+---
+# filebeat-config-9.yaml
+# filebeat-config-fixed.json
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecom-filebeat-config-9
+  namespace: dis-poc-514020
+data:
+  filebeat.yml: |
+    # SIMPLE CONFIG THAT WORKS
+    
+    # 1. Read ALL log files
+    filebeat.inputs:
+    - type: filestream
+      id: ecom-app-logs
+      paths:
+        - /mnt/ecom-logs/*.log
+      processors:
+        - add_fields:
+            target: "event"
+            fields:
+              original: "%{[message]}"
+
+    
+    output.logstash:
+      hosts: ["ecom-logstash-svc:5044"]
+      ssl.enabled: false
+      timeout: 30s
+      backoff.init: 1s
+      backoff.max: 10s
+      worker: 1
+      bulk_max_size: 200
+    
+    logging.level: warning
